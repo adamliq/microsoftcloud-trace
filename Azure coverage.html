@@ -1072,11 +1072,34 @@ function suggestOf(r,c){
   return rk>=need?"req":rk===need-1?"rec":"none";
 }
 /* req | rec | none | out (the baseline has no rule for this resource type) */
+const DCFG_DEFAULT={threshold:50,blend:true,exclude:true};
+const dcfg=()=>({...DCFG_DEFAULT,...(BL.dcfg||{})});
+/* share of the estate's resources of this type that collect the category, or null when the estate has no such type */
+function estateShare(r,c){
+  const D=BL.derived; if(!D||c.os||c.app||c.def||c.dev) return null;
+  const T=D.types[typeKey(r,c)]; if(!T||!T.n) return null;
+  return {share:(T.cats[c.c]||0)/T.n,n:T.n,count:T.cats[c.c]||0};
+}
+function derivedReq(r,c){
+  const s=estateShare(r,c); if(!s) return null;
+  const cfg=dcfg();
+  if(s.share>=cfg.threshold/100&&s.count>0) return "req";
+  if(cfg.blend&&c.w==="crit") return "req";
+  if(s.count>0) return "rec";
+  return "none";
+}
 function reqOf(r,c){
   if(c.na) return "none";
   const o=BL.ov[bkey(r,c)]; if(o) return o;
+  const dv=derivedReq(r,c); if(dv) return dv;
   if(!typeCovered(r,c)) return "out";
   return suggestOf(r,c);
+}
+function ruleTxt(r,c,b){
+  if(BL.ov[bkey(r,c)]) return `${REQL[b.req]} (override)`;
+  const s=estateShare(r,c);
+  if(s) return `${REQL[b.req]} (estate: ${Math.round(s.share*100)}% of ${s.n}${s.count===0&&b.req==="req"?", required as Critical":""})`;
+  return `${REQL[b.req]} (${({crit:"Critical",high:"High",med:"Medium",low:"Low"})[c.w]||c.w} ≥ ${({crit:"Critical",high:"High",med:"Medium",low:"Low"})[BL.reqLevel]})`;
 }
 function policyExpects(r,c){
   const p=BL.policy; if(!p||!p.types||!p.types[typeKey(r,c)]||c.os||c.nd||c.m||c.ext) return false;
@@ -1315,7 +1338,7 @@ function registerRows(){
       finding:k==="gap"?`Baseline gap: no rule for ${TYPE_LABEL(typeKey(r,c))}${b.e.dests.length?"":" and not collected"}`
         :k==="def-policy"?"Azure Policy should deploy this but no policy setting exists"
         :k==="adv"?`Advisory: ${BST[b.status].toLowerCase()}`:BST[b.status],
-      rule:k==="gap"?`No rule (would be ${REQL[suggestOf(r,c)].toLowerCase()})`:BL.ov[bkey(r,c)]?`${REQL[b.req]} (override)`:`${REQL[b.req]} (${SEVN[c.w]||c.w} ≥ ${SEVN[BL.reqLevel]})`,
+      rule:k==="gap"?`No rule (would be ${REQL[suggestOf(r,c)].toLowerCase()})`:ruleTxt(r,c,b),
       now:nowTxt(b),fix:fixFor(r,c,b),
       pend:inBase&&!inDraft?"Fixed by pending edits":!inBase&&inDraft?"Introduced by pending edits":""});
   }));
@@ -1647,10 +1670,10 @@ function renderDetail(){
         const bline=b.kind==="gap"||b.kind==="gap-collected"?`Baseline gap (central security): would be ${REQL[sug].toLowerCase()} under the baseline's severity rule. ${b.e.dests.length?b.why:"Not collected today."}`
           :b.kind==="none"?"Not required by the baseline":b.kind==="beyond"?`Beyond the baseline: ${b.why.toLowerCase()}`
           :b.kind==="met-policy"?`Required: covered by Azure Policy (${b.polSet}). ${b.why}`
-          :b.kind==="met-platform"?`${REQL[b.req]}: met by ${c.def||c.dev?"Defender for Cloud settings":"the platform's own setting"}. ${b.why}`
+          :b.kind==="met-platform"?`${ruleTxt(r,c,b)}: met by ${c.def||c.dev?"Defender for Cloud settings":"the platform's own setting"}. ${b.why}`
           :b.kind==="def-policy"?`Deficiency (policy): Azure Policy should deploy this (${BL.policy.group} group to ${BL.policy.ws}) but no policy setting exists. Check remediation or exemptions.`
-          :b.kind==="adv"?`Advisory: ${BST[b.status].toLowerCase()}. ${b.why}`
-          :`Deficiency (platform team): ${BST[b.status].toLowerCase()}. ${b.why}`;
+          :b.kind==="adv"?`Advisory: ${BST[b.status].toLowerCase()}. ${b.why} Rule: ${ruleTxt(r,c,b)}.`
+          :`Deficiency (platform team): ${BST[b.status].toLowerCase()}. ${b.why} Rule: ${ruleTxt(r,c,b)}.`;
         const reqSel=`<select class="reqsel" data-req="${esc(bk)}" aria-label="Baseline requirement for ${esc(c.c)}">${[["",(()=>{const t=BL.ov[bk];delete BL.ov[bk];const v=reqOf(r,c);if(t)BL.ov[bk]=t;return v==="out"?"No rule (baseline gap)":"Default ("+REQL[v]+")";})()],["req","Required"],["rec","Recommended"],["none","Not required"]].map(([v,l])=>`<option value="${v}"${(ovr||"")===v?" selected":""}>${l}</option>`).join("")}</select>`;
         return `<div class="cat${e.s!==was?" changed":""}">
           <span class="pill ${e.s}">${STL[e.s]}</span>
@@ -2004,6 +2027,81 @@ function renderInventoryBar(){
   document.getElementById("exp-diag").disabled=!ds;
 }
 
+function buildFromEstate(items,fileNames){
+  const cfg=dcfg();
+  const res=new Map(), sets=[];
+  items.flat(Infinity).forEach(x=>{
+    if(!x||typeof x!=="object") return;
+    const id=String(x.id||"");
+    if(/\/diagnosticSettings\//i.test(id)) sets.push(x);
+    else if(id){ const t=String(x.type||typeFromId(id)||"").toLowerCase(); if(t) res.set(id.toLowerCase().replace(/\/$/,""),{id,t}); }
+  });
+  const inInv=new Set(cfg.exclude?R.map(r=>String(r.id||"").toLowerCase()).filter(id=>id&&!/^\/providers\/microsoft\.aadiam/.test(id)):[]); /* the tenant is shared, never skipped */
+  const typeOfRes=id=>{ const k=id.toLowerCase(); return res.has(k)?res.get(k).t:String(typeFromId(id)||"").toLowerCase(); };
+  const types={}, perRes=new Map(), dest={ws:{},st:{},eh:{}}, pol={types:{},groups:{},ws:{}};
+  let used=0, excluded=0;
+  res.forEach((v,k)=>{ if(inInv.has(k)){ excluded++; return; } (types[v.t]=types[v.t]||{n:0,cats:{}}).n++; });
+  const auditOf=t=>{ const s=new Set(CAT.rows.filter(x=>x.t.toLowerCase()===t&&/audit/i.test(x.c)).map(x=>x.c));
+    RES.filter(r=>String(r.ct||"").toLowerCase()===t).forEach(r=>Object.entries(r.ov||{}).forEach(([c,o])=>{ if(o&&o.a) s.add(c); })); return s; };
+  sets.forEach(s=>{
+    const resId=s.id.replace(/\/providers\/microsoft\.insights\/diagnosticSettings\/[^/]+$/i,"").replace(/\/diagnosticSettings\/[^/]+$/i,"");
+    const key=resId.toLowerCase(); if(inInv.has(key)) return;
+    const t=typeOfRes(resId); if(!t) return;
+    if(!types[t]) types[t]={n:1,cats:{}};
+    const p=s.properties||s;
+    if(!(p.workspaceId||p.storageAccountId||p.eventHubAuthorizationRuleId)) return;
+    used++;
+    const d=registerDest(p);
+    if(d.ws) dest.ws[d.ws]=(dest.ws[d.ws]||0)+1; if(d.st) dest.st[d.st]=(dest.st[d.st]||0)+1; if(d.eh) dest.eh[d.eh]=(dest.eh[d.eh]||0)+1;
+    const cats=perRes.get(key)||new Set(); perRes.set(key,cats);
+    const catRows=CAT.rows.filter(x=>x.t.toLowerCase()===t);
+    (p.logs||[]).filter(l=>l.enabled!==false).forEach(l=>{
+      if(l.categoryGroup){ const g=String(l.categoryGroup).toLowerCase();
+        if(g==="alllogs") catRows.forEach(x=>cats.add(x.c)); else if(g==="audit") auditOf(t).forEach(c=>cats.add(c)); }
+      else if(l.category) cats.add(l.category);
+    });
+    (p.metrics||[]).filter(m=>m.enabled!==false&&m.category).forEach(m=>cats.add(m.category));
+    if(/^setbypolicy/i.test(s.name||s.id.split("/").pop())){ pol.types[t]=true;
+      (p.logs||[]).forEach(l=>{ if(l.categoryGroup) pol.groups[l.categoryGroup]=(pol.groups[l.categoryGroup]||0)+1; });
+      if(d.ws) pol.ws[d.ws]=(pol.ws[d.ws]||0)+1; }
+  });
+  perRes.forEach((cats,key)=>{ const t=typeOfRes(res.has(key)?res.get(key).id:key); if(!types[t]) return; cats.forEach(c=>{ types[t].cats[c]=(types[t].cats[c]||0)+1; }); });
+  const top=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]);
+  const minUse=Math.max(1,Math.round(used*0.05));
+  BL.derived={source:fileNames.join(", "),at:today(),resources:[...res.keys()].length-excluded,settings:used,excluded,types};
+  BL.types={...Object.fromEntries(Object.entries(BL.types).filter(([t])=>/^(os|app:|res:mdc)/.test(t))),...Object.fromEntries(Object.keys(types).map(t=>[t,true]))};
+  BL.approved={ws:Object.fromEntries(top(dest.ws).map(([n,c])=>[n,c>=minUse])),st:Object.fromEntries(top(dest.st).map(([n])=>[n,false])),siem:top(dest.eh).some(([,c])=>c>=minUse)};
+  if(Object.keys(pol.types).length){
+    const g=top(pol.groups)[0]; const w=top(pol.ws)[0];
+    BL.policy={...BL.policy,types:pol.types,group:g&&/alllogs/i.test(g[0])?"allLogs":"audit",ws:w?w[0]:BL.policy.ws};
+  }
+  BL.name=`Derived from the existing estate (${BL.derived.at})`;
+  return BL.derived;
+}
+function renderDerive(){
+  const cfg=dcfg(), D=BL.derived;
+  let sum="";
+  if(D){
+    const rows=Object.entries(D.types).sort((a,b)=>b[1].n-a[1].n);
+    const reqN=t=>Object.values(t.cats).filter(n=>n/t.n>=cfg.threshold/100).length;
+    sum=`<p class="muted" style="margin:0;font-size:.8rem">From ${esc(D.source)}: ${D.resources} resources across ${rows.length} types, ${D.settings} diagnostic settings with a destination${D.excluded?`, ${D.excluded} resource${D.excluded===1?"":"s"} skipped because ${D.excluded===1?"it belongs":"they belong"} to the platform being assessed`:""}.</p>
+      <details><summary class="lnk" style="font-size:.84rem">What the estate does, by resource type</summary>
+        <div class="mx-scroll"><table class="ptab" style="min-width:520px;margin-top:6px"><thead><tr><th>Resource type</th><th>Resources</th><th>Required here</th><th>Most collected</th></tr></thead><tbody>
+        ${rows.map(([t,v])=>`<tr><td class="mono">${esc(TYPE_LABEL(t))}</td><td class="num">${v.n}</td><td class="num">${reqN(v)}</td><td><small>${Object.entries(v.cats).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([c,n])=>`${esc(c)} ${Math.round(n/v.n*100)}%`).join(", ")||"nothing"}</small></td></tr>`).join("")}
+        </tbody></table></div></details>`;
+  }
+  return `<div class="ds" style="background:var(--surface)">
+    <div class="ds-h"><span class="nm">Inherit from the existing estate</span>${D?` <span class="flag ok">in use</span>`:""}</div>
+    <p class="muted" style="margin:0;font-size:.8rem">Load <span class="mono">resources.json</span> and <span class="mono">diagnostic-settings.json</span> exported from the company's existing subscriptions (the export scripts produce both). For each resource type, a log type enabled on at least the threshold share of the estate's resources becomes required, so the new platform inherits what the company already does. Destinations and the policy assignment are taken from the estate too; adjust them below.</p>
+    <div class="dest addsrc" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+      <label>Required when used on at least (%)<input id="dc-thr" type="number" min="1" max="100" data-dcfg="threshold" value="${cfg.threshold}"></label>
+      <label class="grp" style="display:flex;gap:6px;align-items:center;align-self:end;text-transform:none;letter-spacing:0;font-weight:400;font-size:.84rem;color:var(--ink)"><input type="checkbox" id="dc-blend" data-dcfg="blend"${cfg.blend?" checked":""}> Also require Critical categories</label>
+      <label class="grp" style="display:flex;gap:6px;align-items:center;align-self:end;text-transform:none;letter-spacing:0;font-weight:400;font-size:.84rem;color:var(--ink)"><input type="checkbox" id="dc-excl" data-dcfg="exclude"${cfg.exclude?" checked":""}> Skip resources already in the inventory</label>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn file-btn primary">${D?"Rebuild from estate export":"Choose estate export files"}<input type="file" id="bl-estate" accept=".json,application/json" multiple aria-label="Estate export files"></span>${D?`<button class="btn" id="bl-derive-clear">Stop inheriting</button>`:""}</div>
+    ${sum}
+  </div>`;
+}
 function renderBaseline(){
   const lv=[["crit","Critical"],["high","High and above"],["med","Medium and above"]];
   const dests=[...Object.keys(DEST.ws).map(n=>["ws",n,"Log Analytics workspace"]),["siem","SIEM","SIEM (agent or Event Hub stream)"],...Object.keys(DEST.st).map(n=>["st",n,"Storage account (archive)"])];
@@ -2014,7 +2112,8 @@ function renderBaseline(){
     <div class="dest" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
       <label>Required at catalog severity<select id="bl-level" data-bl="reqLevel">${lv.map(([v,l])=>`<option value="${v}"${BL.reqLevel===v?" selected":""}>${l}</option>`).join("")}</select></label>
     </div>
-    <p class="muted" style="margin:0;font-size:.8rem">The level below the required one counts as recommended; anything lower isn't required. Override single categories on any resource; overrides apply to that resource type everywhere.</p>
+    <p class="muted" style="margin:0;font-size:.8rem">${BL.derived?"Types the estate has use its practice (above). Other types, VM OS logs, applications and Defender use this severity rule. ":""}The level below the required one counts as recommended; anything lower isn't required. Override single categories on any resource; overrides apply to that resource type everywhere.</p>
+    ${renderDerive()}
     ${(()=>{ const types=[...new Set(R.flatMap(r=>scored(r).map(c=>typeKey(r,c))))].sort();
       const cov=types.filter(t=>BL.types[t]).length;
       const pTypes=[...new Set(R.map(r=>String(r.ct||"").toLowerCase()).filter(t=>t.includes("/")))].sort();
@@ -2062,6 +2161,15 @@ document.getElementById("go-chg").addEventListener("click",()=>document.getEleme
 const blEl=document.getElementById("baseline");
 blEl.addEventListener("change",async e=>{
   const t=e.target;
+  if(t.id==="bl-estate"){ const files=[...t.files]; t.value=""; if(!files.length) return;
+    try{ const items=[]; for(const f of files){ const j=JSON.parse((await f.text()).replace(/^\uFEFF/,"")); items.push(Array.isArray(j)?j:(j.value||j.data||[j])); }
+      const D=buildFromEstate(items,files.map(f=>f.name));
+      if(!D.resources&&!D.settings) throw new Error("empty");
+      saveBL(); save(); render();
+      setMsg(`Baseline built from ${D.resources} existing resources and ${D.settings} diagnostic settings across ${Object.keys(D.types).length} resource types.`);
+    }catch(err){ setMsg("Couldn't read those files. Choose the resources.json and diagnostic-settings.json produced by the export script.",true); }
+    return; }
+  if(t.dataset.dcfg){ const k=t.dataset.dcfg; BL.dcfg={...dcfg(),[k]:t.type==="checkbox"?t.checked:Math.min(100,Math.max(1,parseInt(t.value,10)||50))}; saveBL(); render(); return; }
   if(t.id==="bl-file"){ const f=t.files[0]; t.value=""; if(!f) return;
     try{ const j=JSON.parse(await f.text()); if(!j||typeof j!=="object"||!j.approved) throw 0;
       BL={...clone(BL_DEFAULT),...j,policy:{...clone(BL_DEFAULT.policy),...(j.policy||{})}}; ["ws","st"].forEach(k=>Object.keys(BL.approved[k]||{}).forEach(n=>{ if(!DEST[k][n]) DEST[k][n]=(j.ids&&j.ids[k]&&j.ids[k][n])||n; }));
@@ -2083,6 +2191,7 @@ document.getElementById("golive").addEventListener("click",e=>{
 blEl.addEventListener("click",e=>{
   const id=e.target.id;
   if(id==="bl-export"){ offerFile(`logging-baseline-${today()}.json`,JSON.stringify({...BL,ids:{ws:Object.fromEntries(Object.keys(BL.approved.ws).map(n=>[n,DEST.ws[n]||""])),st:Object.fromEntries(Object.keys(BL.approved.st).map(n=>[n,DEST.st[n]||""]))}},null,2)); }
+  if(id==="bl-derive-clear"){ delete BL.derived; BL.name=BL_DEFAULT.name; saveBL(); render(); return; }
   if(id==="bl-reset"){ BL=clone(BL_DEFAULT); saveBL(); render(); }
   if(id==="bl-clear-ov"){ BL.ov={}; saveBL(); render(); }
 });
