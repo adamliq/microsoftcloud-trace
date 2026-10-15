@@ -1,5 +1,11 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Contoso Shop Log Coverage</title>
+<style>:root{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Schibsted+Grotesk:wght@600;700;800&display=swap">
@@ -144,6 +150,17 @@ pre{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:8
 .cat .bl.ok{background:var(--ok-soft);color:var(--ok)} .cat .bl.bad{background:var(--bad-soft);color:var(--bad)} .cat .bl.warn{background:var(--warn-soft);color:var(--warn)}
 .reqsel{font-size:.74rem;padding:2px 4px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);max-width:100%}
 .dtable{display:grid;gap:4px}
+.reg-sum{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:.84rem;color:var(--muted)}
+.reg-sum b{color:var(--ink);font-size:1rem}
+.reg-f{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+table.reg{min-width:980px}
+.reg td{font-size:.82rem}
+.reg td small{display:block}
+.reg td .rf{display:block;margin-top:2px}
+.reg td.fx{max-width:28ch;color:var(--ink)}
+.reg td.trk{display:grid;gap:4px;min-width:150px}
+.reg td.trk input{font-size:.78rem;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);width:100%}
+.reg tr.done td{opacity:.6}
 .app{border:1px solid var(--line);border-radius:6px;padding:10px;display:grid;gap:8px;background:var(--surface)}
 .asrc{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;font-size:.84rem;border-top:1px solid var(--line);padding-top:8px}
 .asrc small{display:block;color:var(--muted);font-size:.74rem;overflow-wrap:anywhere}
@@ -228,6 +245,9 @@ footer{font-size:.8rem;color:var(--muted);max-width:80ch}
 @media (prefers-reduced-motion:reduce){.stack span{transition:none}}
 </style>
 
+
+</head>
+<body>
 <div class="wrap">
   <header>
     <span class="eyebrow">Logging baseline compliance · proof of concept with a sample tenant</span>
@@ -306,6 +326,8 @@ az rest --method get --url "https://management.azure.com/providers/microsoft.aad
   <section class="mx" id="paths" aria-labelledby="paths-h"></section>
 
   <section class="mx" id="golive" aria-labelledby="gl-h"></section>
+
+  <section class="mx" id="register" aria-labelledby="reg-h"></section>
 
   <section class="mx" aria-labelledby="mx-h">
     <div>
@@ -1248,6 +1270,121 @@ function renderPaths(){
       <tr class="none"><td>Not collected</td><td class="mono">–</td><td><span class="flag bad">gap</span></td><td class="num">${none}</td><td class="num">${noneReq}</td><td></td></tr>
     </tbody></table></div>`;
 }
+
+/* ---------- Deficiency register ---------- */
+const REGK="contoso-register-v1";
+let REG={}; try{ REG=JSON.parse(localStorage.getItem(REGK)||"{}")||{}; }catch(e){ REG={}; }
+const saveREG=()=>{ try{ localStorage.setItem(REGK,JSON.stringify(REG)); }catch(e){} };
+let regF={owner:"",status:"",sev:"",q:"",adv:false};
+const REG_STATUS=["Open","In progress","Accepted risk","Resolved"];
+const OWNER={"def-platform":"Platform team","def-policy":"Central logging (policy)","def-central":"Central security (Defender)",gap:"Central security (baseline)",risk:"Central security (baseline)",adv:"Platform team (advisory)"};
+const SEVN={crit:"Critical",high:"High",med:"Medium",low:"Low"};
+const regKind=b=>b.kind==="gap-collected"?"gap":b.kind;
+function regRelevant(r,c,b){
+  const k=regKind(b);
+  if(k==="def-platform"||k==="def-policy"||k==="def-central") return true;
+  if(k==="gap") return suggestOf(r,c)==="req"||(regF.adv&&suggestOf(r,c)==="rec");
+  if(k==="adv") return regF.adv;
+  return false;
+}
+function nowTxt(b){ return b.e.dests.length?[...new Set(b.e.dests.map(pathTxt))].join("; "):"Not collected"; }
+function fixFor(r,c,b){
+  const k=regKind(b);
+  if(k==="gap") return `Decide whether ${TYPE_LABEL(typeKey(r,c))} belongs in the baseline. Its severity rule would make this ${REQL[suggestOf(r,c)].toLowerCase()}.`;
+  if(k==="def-policy") return `Run the remediation task for “${BL.policy.name}”, or check its scope and exemptions for ${r.name}.`;
+  if(c.def){
+    if(c.def.kind==="alert"){ const p=DEF_PLANS.find(x=>x.id===c.def.plan); return (mdcGet().plans[p.id]||{}).on?"Send Defender alerts to an approved destination: continuous export or the Defender XDR connector.":`Turn on the Defender ${p.label} plan.`; }
+    const x=DEF_EXPORTS.find(y=>y.id===c.def.id); return `Add “${x.c}” to Defender continuous export with an approved workspace${x.needs&&!(mdcGet().plans[x.needs]||{}).on?`, and turn on the ${x.needs} plan`:""}.`;
+  }
+  if(c.dev){ const s=mdcGet().plans.servers||{}; return !s.on||!s.mde?"Turn on Defender for Servers with Defender for Endpoint integration, then stream device tables with the Defender XDR connector.":"Stream Defender for Endpoint device tables with the Defender XDR connector."; }
+  if(c.os) return `Collect it with ${dcrNameOf(osGet(r.k))} (${c.os.ch}) or the SIEM agent on ${r.name}${c.os.needs&&!osGet(r.k).audit[c.os.needs]?`, and turn on ${AUDIT[c.os.needs].label}`:""}.`;
+  if(c.app) return `Tick Azure Monitor Agent or SIEM agent for this source under Applications on ${r.name}.`;
+  if(b.status==="dest") return `Send it to an approved destination as well. Today: ${nowTxt(b)}.`;
+  if(c.ext) return `Collect it into an approved destination; it is produced outside diagnostic settings.`;
+  return `Add ${c.c} to a diagnostic setting on ${r.name} that sends to an approved destination.`;
+}
+function registerRows(){
+  const rows=[];
+  R.forEach(r=>scored(r).forEach(c=>{
+    const bb=bstat(r,c,BASE), bd=bstat(r,c);
+    const inBase=regRelevant(r,c,bb), inDraft=regRelevant(r,c,bd);
+    if(!inBase&&!inDraft) return;
+    const b=inBase?bb:bd, k=regKind(b);
+    const id=`${r.k}|${c.c}`;
+    rows.push({id,r,c,b,k,sev:c.w,owner:OWNER[k]||"Platform team",resource:r.name,rtype:TYPE_LABEL(typeKey(r,c)),cat:c.c,
+      finding:k==="gap"?`Baseline gap: no rule for ${TYPE_LABEL(typeKey(r,c))}${b.e.dests.length?"":" and not collected"}`
+        :k==="def-policy"?"Azure Policy should deploy this but no policy setting exists"
+        :k==="adv"?`Advisory: ${BST[b.status].toLowerCase()}`:BST[b.status],
+      rule:k==="gap"?`No rule (would be ${REQL[suggestOf(r,c)].toLowerCase()})`:BL.ov[bkey(r,c)]?`${REQL[b.req]} (override)`:`${REQL[b.req]} (${SEVN[c.w]||c.w} ≥ ${SEVN[BL.reqLevel]})`,
+      now:nowTxt(b),fix:fixFor(r,c,b),
+      pend:inBase&&!inDraft?"Fixed by pending edits":!inBase&&inDraft?"Introduced by pending edits":""});
+  }));
+  RISKS.forEach(rk=>{ const s=riskStatus(rk); if(s.st!=="none"&&s.st!=="gap") return;
+    rows.push({id:`risk|${rk.name}`,r:s.hits[0]?s.hits[0].r:null,c:null,k:"risk",sev:"high",owner:OWNER.risk,resource:"Platform",rtype:"Customer-facing risk",cat:rk.name,
+      finding:s.st==="none"?"No log source in the platform":"Source exists, but the baseline has no rule for it",rule:"Customer-facing risk",now:s.hits.length?[...new Set(s.hits.map(x=>nowTxt(x.b)))].join("; "):"Not collected",
+      fix:s.txt+". Decide which source the baseline requires.",pend:""}); });
+  const ord={crit:0,high:1,med:2,low:3}, oo={"def-platform":0,"def-central":1,"def-policy":2,gap:3,risk:4,adv:5};
+  rows.sort((a,b)=>(ord[a.sev]-ord[b.sev])||(oo[a.k]-oo[b.k])||a.resource.localeCompare(b.resource)||a.cat.localeCompare(b.cat));
+  rows.forEach(x=>{ const t=REG[x.id]||{}; x.status=t.status||(x.pend==="Fixed by pending edits"?"In progress":"Open"); x.note=t.note||""; x.due=t.due||""; x.assignee=t.assignee||""; });
+  return rows;
+}
+function renderRegister(){
+  const el=document.getElementById("register"); if(!R.length){ el.innerHTML=""; return; }
+  const all=registerRows();
+  const q=regF.q.toLowerCase();
+  const rows=all.filter(x=>(!regF.owner||x.owner===regF.owner)&&(!regF.status||x.status===regF.status)&&(!regF.sev||x.sev===regF.sev)&&(!q||`${x.resource} ${x.cat} ${x.finding} ${x.note} ${x.assignee}`.toLowerCase().includes(q)));
+  const cnt=f=>all.filter(f).length;
+  const owners=[...new Set(all.map(x=>x.owner))];
+  const sel=(id,key,opts,label)=>`<label>${label}<select id="${id}" data-regf="${key}"><option value="">All</option>${opts.map(([v,l])=>`<option value="${esc(v)}"${regF[key]===v?" selected":""}>${esc(l)}</option>`).join("")}</select></label>`;
+  const focusId=document.activeElement&&document.activeElement.id;
+  el.innerHTML=`<div class="row-h"><div><h2 id="reg-h">Deficiency register</h2>
+      <p class="note">Every finding against the baseline, ranked by severity, with its owner and the fix. Status, assignee, due date and notes are yours to track; they're kept in this browser and included in the export.</p></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn" id="reg-csv">Export CSV</button><button class="btn" id="reg-json">Export JSON</button></div></div>
+    <div class="reg-sum">
+      ${owners.map(o=>`<span><b class="mono">${cnt(x=>x.owner===o&&x.status!=="Resolved"&&x.status!=="Accepted risk")}</b> open · ${esc(o)}</span>`).join("")}
+      <span><b class="mono">${cnt(x=>x.sev==="crit"&&x.status!=="Resolved"&&x.status!=="Accepted risk")}</b> critical open</span>
+      <span><b class="mono">${cnt(x=>x.pend==="Fixed by pending edits")}</b> fixed by pending edits</span>
+      <span><b class="mono">${cnt(x=>x.status==="Accepted risk")}</b> accepted risk</span>
+    </div>
+    <div class="dest addsrc reg-f">
+      ${sel("regf-owner","owner",owners.map(o=>[o,o]),"Owner")}
+      ${sel("regf-status","status",REG_STATUS.map(s=>[s,s]),"Status")}
+      ${sel("regf-sev","sev",[["crit","Critical"],["high","High"],["med","Medium"],["low","Low"]],"Severity")}
+      <label>Search<input id="regf-q" data-regf="q" value="${esc(regF.q)}" placeholder="Resource, category, note"></label>
+      <label class="grp" style="display:flex;gap:6px;align-items:center;align-self:end;text-transform:none;letter-spacing:0;font-weight:400;font-size:.84rem;color:var(--ink)"><input type="checkbox" id="regf-adv" data-regf="adv"${regF.adv?" checked":""}> Include advisories</label>
+    </div>
+    <p class="muted" style="margin:0;font-size:.8rem">${rows.length} of ${all.length} findings shown.</p>
+    <div class="mx-scroll"><table class="ptab reg"><thead><tr><th>#</th><th>Severity</th><th>Finding</th><th>Owner</th><th>Fix</th><th>Status</th><th>Tracking</th></tr></thead><tbody>
+      ${rows.map((x,i)=>{ const sid=x.id.replace(/[^a-z0-9]/gi,"_");
+        return `<tr class="${x.status==="Resolved"||x.status==="Accepted risk"?"done":""}">
+        <td class="num">${i+1}</td>
+        <td><span class="imp ${x.sev}">${SEVN[x.sev]||x.sev}</span></td>
+        <td><b>${esc(x.cat)}</b><small>${x.r?`<button class="lnk" data-k="${x.r.k}">${esc(x.resource)}</button>`:esc(x.resource)} · ${esc(x.rtype)}</small><span class="rf">${esc(x.finding)}</span><small>Now: ${esc(x.now)}</small><small>Rule: ${esc(x.rule)}</small>${x.pend?`<span class="flag ${x.pend.startsWith("Fixed")?"ok":"bad"}">${esc(x.pend)}</span>`:""}</td>
+        <td>${esc(x.owner)}</td>
+        <td class="fx">${esc(x.fix)}</td>
+        <td><select id="rs-${sid}" data-regst="${esc(x.id)}" class="reqsel">${REG_STATUS.map(s=>`<option${x.status===s?" selected":""}>${s}</option>`).join("")}</select></td>
+        <td class="trk"><input id="ra-${sid}" data-regfield="assignee" data-regid="${esc(x.id)}" value="${esc(x.assignee)}" placeholder="Assignee" aria-label="Assignee"><input id="rd-${sid}" type="date" data-regfield="due" data-regid="${esc(x.id)}" value="${esc(x.due)}" aria-label="Due date"><input id="rn-${sid}" data-regfield="note" data-regid="${esc(x.id)}" value="${esc(x.note)}" placeholder="Note" aria-label="Note"></td>
+      </tr>`; }).join("")||`<tr><td colspan="7" class="muted">No findings match these filters.</td></tr>`}
+    </tbody></table></div>`;
+  if(focusId&&focusId.startsWith("regf-")){ const f=document.getElementById(focusId); if(f){ f.focus(); if(f.setSelectionRange&&f.type!=="checkbox"){ const v=f.value.length; f.setSelectionRange(v,v);} } }
+}
+function regExportRows(){ return registerRows().map((x,i)=>({"#":i+1,id:x.id,severity:SEVN[x.sev]||x.sev,owner:x.owner,resource:x.resource,resourceType:x.rtype,category:x.cat,finding:x.finding,baselineRule:x.rule,collectedNow:x.now,fix:x.fix,pendingEdits:x.pend,status:x.status,assignee:x.assignee,due:x.due,note:x.note})); }
+const regEl=document.getElementById("register");
+regEl.addEventListener("input",e=>{ const t=e.target; if(t.dataset.regf==="q"){ regF.q=t.value; renderRegister(); } });
+regEl.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.dataset.regf&&t.dataset.regf!=="q"){ regF[t.dataset.regf]=t.type==="checkbox"?t.checked:t.value; renderRegister(); return; }
+  if(t.dataset.regst){ REG[t.dataset.regst]={...(REG[t.dataset.regst]||{}),status:t.value}; saveREG(); renderRegister(); return; }
+  if(t.dataset.regfield){ REG[t.dataset.regid]={...(REG[t.dataset.regid]||{}),[t.dataset.regfield]:t.value}; saveREG(); return; }
+});
+regEl.addEventListener("click",e=>{
+  if(e.target.id==="reg-json") offerFile(`deficiency-register-${today()}.json`,JSON.stringify(regExportRows(),null,2));
+  if(e.target.id==="reg-csv"){ const rows=regExportRows(), cols=Object.keys(rows[0]||{"#":1});
+    const q=v=>{ v=String(v??""); return /[",\n]/.test(v)?`"${v.replace(/"/g,'""')}"`:v; };
+    offerFile(`deficiency-register-${today()}.csv`,[cols.join(","),...rows.map(r=>cols.map(c=>q(r[c])).join(","))].join("\n")); }
+  const l=e.target.closest("button.lnk[data-k]"); if(l) select(l.dataset.k,true);
+});
+
 function renderGoLive(){
   const el=document.getElementById("golive"); if(!R.length){ el.innerHTML=""; return; }
   const g=goLive(), name=k=>esc(byK[k].name);
@@ -1803,6 +1940,7 @@ async function offerFile(filename,data,btn){
     try{ await downloadsApi.save({filename,data}); setMsg(`Saved ${filename}.`); return; }
     catch(e){ if(e&&e.code==="declined"){ setMsg("Save cancelled."); return; } if(e&&e.code==="rate_limited"){ setMsg("A save prompt is already open. Finish it, then try again."); return; } }
   }
+  if(!window.claude){ try{ const u=URL.createObjectURL(new Blob([data],{type:/\.csv$/.test(filename)?"text/csv":"application/json"})); const l=document.createElement("a"); l.href=u; l.download=filename; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(u),2000); setMsg(`Downloaded ${filename}.`); return; }catch(e){} }
   out.hidden=false; document.getElementById("inv-out-text").value=data; document.getElementById("inv-out-name").textContent=filename;
   setMsg(`Saving files isn't available here, so ${filename} is shown below. Copy it into a file.`);
 }
@@ -1899,7 +2037,7 @@ function renderBaseline(){
 }
 function render(){
   const fid=document.activeElement&&document.activeElement.id;
-  renderCatalog();renderInventoryBar();renderBaseline();renderSummary();renderPaths();renderGoLive();renderMatrix();renderList();renderDetail();renderChanges();renderScen();
+  renderCatalog();renderInventoryBar();renderBaseline();renderSummary();renderPaths();renderGoLive();renderRegister();renderMatrix();renderList();renderDetail();renderChanges();renderScen();
   if(fid){const el=document.getElementById(fid); if(el) el.focus({preventScroll:true});}
 }
 function select(k,scroll){
@@ -2043,4 +2181,5 @@ document.getElementById("changes").addEventListener("click",e=>{
 render();
 </script>
 
-</body></html>
+</body>
+</html>
