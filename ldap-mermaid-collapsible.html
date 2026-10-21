@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LDAP Evidence — Collapsible Mermaid Diagram</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    window.mermaid = mermaid;
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      securityLevel: 'loose',
+      flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis',
+        padding: 12,
+        nodeSpacing: 30,
+        rankSpacing: 40
+      },
+      themeVariables: {
+        darkMode: true,
+        background: '#0f1419',
+        primaryColor: '#1e293b',
+        primaryTextColor: '#e7ecf3',
+        primaryBorderColor: '#3b82f6',
+        lineColor: '#64748b',
+        secondaryColor: '#1a2332',
+        tertiaryColor: '#243044',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '13px'
+      }
+    });
+    // Kick off once DOM ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => window.initCollapsibleMermaid?.());
+    } else {
+      window.initCollapsibleMermaid?.();
+    }
+  </script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface2: #243044;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --cyan: #06b6d4;
+      --purple: #a78bfa;
+      --amber: #f59e0b;
+      --green: #22c55e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem 1.2rem;
+      flex-shrink: 0;
+    }
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .header h1 { font-size: 1.1rem; font-weight: 600; }
+    .header p { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
+    .controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+    button {
+      font-family: inherit;
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.35rem 0.75rem;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+    }
+    button:hover { background: var(--surface2); border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary:hover { background: #2563eb; }
+    .hint { font-size: 0.72rem; color: var(--muted); }
+
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 0;
+    }
+    @media (max-width: 800px) {
+      .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    }
+
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+      overflow-y: auto;
+      font-size: 0.82rem;
+    }
+    .sidebar h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+    .toggle-list { list-style: none; }
+    .toggle-list li {
+      margin-bottom: 0.35rem;
+    }
+    .toggle-list label {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      cursor: pointer;
+      padding: 0.35rem 0.4rem;
+      border-radius: 6px;
+    }
+    .toggle-list label:hover { background: var(--surface2); }
+    .toggle-list input { margin-top: 0.2rem; accent-color: var(--accent); }
+    .toggle-list .t-title { font-weight: 500; line-height: 1.3; }
+    .toggle-list .t-type {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .diagram-area {
+      overflow: auto;
+      padding: 1.25rem;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(59,130,246,0.05), transparent 45%),
+        var(--bg);
+    }
+    #mermaid-container {
+      min-width: min-content;
+    }
+    #mermaid-container .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.9rem;
+      padding: 0.6rem 1.2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 0.72rem;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .swatch {
+      width: 11px; height: 11px;
+      border-radius: 2px;
+      border: 1.5px solid;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <div>
+        <h1>LDAP Connection Evidence — Collapsible Mermaid</h1>
+        <p>Toggle decision points in the sidebar · Diagram re-renders with expanded / collapsed branches</p>
+      </div>
+      <div class="controls">
+        <span class="hint">Ctrl/Cmd + scroll to zoom</span>
+        <button type="button" id="btn-expand-all">Expand all</button>
+        <button type="button" id="btn-collapse-all">Collapse all</button>
+        <button type="button" class="primary" id="btn-evidence">Evidence paths only</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Decision points</h2>
+      <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem">
+        Uncheck a decision to collapse its branches into a summary node.
+      </p>
+      <ul class="toggle-list" id="toggle-list"></ul>
+    </aside>
+    <div class="diagram-area" id="diagram-area">
+      <div id="mermaid-container"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="swatch" style="background:#0c4a6e;border-color:#06b6d4"></i> Start / process</span>
+    <span><i class="swatch" style="background:#1e3a5f;border-color:#3b82f6;border-radius:50%"></i> Decision</span>
+    <span><i class="swatch" style="background:#2e1065;border-color:#a78bfa"></i> Evidence</span>
+    <span><i class="swatch" style="background:#422006;border-color:#f59e0b"></i> Gap</span>
+    <span><i class="swatch" style="background:#052e16;border-color:#22c55e"></i> Outcome</span>
+    <span><i class="swatch" style="background:#1e293b;border-color:#64748b;border-style:dashed"></i> Collapsed summary</span>
+  </div>
+
+  <script>
+    // Full graph definition as structured data
+    // Each decision has an id; expanded[id] controls whether children are shown
+    const decisions = [
+      { id: "B", label: "Client has Universal Forwarder?" },
+      { id: "F", label: "Firewall / network capture?" },
+      { id: "J", label: "DC connection auditing?" },
+      { id: "M", label: "LDAP transport?" },
+      { id: "N", label: "Unsigned / clear-text bind?" },
+      { id: "Q", label: "Channel-binding condition?" },
+      { id: "V", label: "Successful logon (4624)?" }
+    ];
+
+    // expanded state: true = show children
+    const expanded = Object.fromEntries(decisions.map(d => [d.id, true]));
+
+    // Evidence-path preset: expand only decisions that lead to collectable events
+    const evidencePreset = { B: true, F: true, J: true, M: true, N: true, Q: true, V: true };
+
+    function buildMermaid() {
+      const lines = ["flowchart TD"];
+
+      // Always show start
+      lines.push('  A["Application initiates LDAP connection"]');
+
+      // --- Client branch ---
+      lines.push('  A --> B{"Can the LDAP client<br/>have a Universal Forwarder?"}');
+      if (expanded.B) {
+        lines.push('  B -->|"Yes — Windows with Sysmon"| C["Client Sysmon — Event 3<br/>Process ID / ProcessGuid / executable / User<br/>Source and destination IP addresses and ports"]');
+        lines.push('  C --> D["Client UF collects<br/>Sysmon Operational log"]');
+        lines.push('  D --> Y["Splunk correlation<br/>Match time, client/DC IP addresses and ports<br/>Identify application, connection and available bind identity"]');
+        lines.push('  B -->|"No"| E["Client process attribution<br/>requires other evidence"]');
+      } else {
+        lines.push('  B --> Bcol["▸ Client branch collapsed<br/>(Sysmon Event 3 / UF or other evidence)"]');
+      }
+
+      // --- Network branch ---
+      lines.push('  A --> F{"Firewall or network traffic captured<br/>to/from DC LDAP ports?<br/>TCP 389 / 636 / 3268 / 3269"}');
+      if (expanded.F) {
+        lines.push('  F -->|"Yes"| G["Collect firewall / flow / network records<br/>Client and DC IP addresses / ports<br/>Time, direction, action and connection details"]');
+        lines.push('  G --> Y');
+        lines.push('  F -->|"No"| H["No firewall / network evidence<br/>Use available client and DC events"]');
+      } else {
+        lines.push('  F --> Fcol["▸ Network branch collapsed<br/>(flow records or use client/DC events)"]');
+      }
+
+      // --- DC branch ---
+      lines.push('  A --> I["Connection reaches domain controller"]');
+
+      // J - connection audit
+      lines.push('  I --> J{"DC connection auditing enabled?"}');
+      if (expanded.J) {
+        lines.push('  J -->|"Yes"| K["DC Security — Event 5156<br/>Permitted connection<br/>IP addresses / ports and DC-local process"]');
+        lines.push('  K --> X["DC UF collects<br/>Security and Directory Service logs"]');
+        lines.push('  X --> Y');
+        lines.push('  J -->|"No"| L["No 5156 connection evidence"]');
+      } else {
+        lines.push('  J --> Jcol["▸ Connection audit collapsed<br/>(Event 5156 or none)"]');
+      }
+
+      // M - transport
+      lines.push('  I --> M{"LDAP transport?"}');
+      if (expanded.M) {
+        lines.push('  M -->|"LDAP without TLS"| N{"Unsigned SASL bind or<br/>clear-text simple bind?"}');
+        if (expanded.N) {
+          lines.push('  N -->|"Yes"| O["DC Directory Service — Event 2889<br/>Client IP and attempted bind identity<br/>Requires diagnostic logging ≥ 2"]');
+          lines.push('  O --> X');
+          lines.push('  N -->|"No — signed LDAP"| P["No 2889 for this bind"]');
+        } else {
+          lines.push('  N --> Ncol["▸ Bind type collapsed<br/>(Event 2889 or none)"]');
+        }
+
+        lines.push('  M -->|"LDAPS or StartTLS"| Q{"Channel-binding condition?"}');
+        if (expanded.Q) {
+          lines.push('  Q -->|"Validation fails"| R["DC Directory Service — Event 3039"]');
+          lines.push('  R --> X');
+          lines.push('  Q -->|"Would fail under enforcement"| S["DC Directory Service — Event 3074"]');
+          lines.push('  S --> X');
+          lines.push('  Q -->|"Channel-binding information missing"| T["DC Directory Service — Event 3075"]');
+          lines.push('  T --> X');
+          lines.push('  Q -->|"Valid or outside audit conditions"| U["No comprehensive per-bind<br/>LDAPS success event"]');
+        } else {
+          lines.push('  Q --> Qcol["▸ Channel-binding collapsed<br/>(Events 3039 / 3074 / 3075 or none)"]');
+        }
+      } else {
+        lines.push('  M --> Mcol["▸ Transport branch collapsed<br/>(plain LDAP or LDAPS events)"]');
+      }
+
+      // V - logon
+      lines.push('  I --> V{"Successful Windows logon recorded<br/>with success auditing enabled?"}');
+      if (expanded.V) {
+        lines.push('  V -->|"Yes"| W["DC Security — Event 4624<br/>Corroborating logon evidence"]');
+        lines.push('  W --> X');
+      } else {
+        lines.push('  V --> Vcol["▸ Logon evidence collapsed<br/>(Event 4624)"]');
+      }
+
+      // Styles
+      lines.push('');
+      lines.push('  classDef decision fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#e7ecf3');
+      lines.push('  classDef process fill:#1e293b,stroke:#64748b,stroke-width:1.5px,color:#e7ecf3');
+      lines.push('  classDef evidence fill:#2e1065,stroke:#a78bfa,stroke-width:2px,color:#e7ecf3');
+      lines.push('  classDef gap fill:#422006,stroke:#f59e0b,stroke-width:1.5px,color:#e7ecf3');
+      lines.push('  classDef outcome fill:#052e16,stroke:#22c55e,stroke-width:2px,color:#e7ecf3');
+      lines.push('  classDef start fill:#0c4a6e,stroke:#06b6d4,stroke-width:2px,color:#e7ecf3');
+      lines.push('  classDef collapsed fill:#1e293b,stroke:#64748b,stroke-width:1.5px,stroke-dasharray:5 4,color:#8b9cb3');
+
+      lines.push('  class A,I start');
+      lines.push('  class B,F,J,M,N,Q,V decision');
+      lines.push('  class C,G,K,O,R,S,T,W evidence');
+      lines.push('  class E,H,L,P,U gap');
+      lines.push('  class D,X,Y outcome');
+      lines.push('  class Bcol,Fcol,Jcol,Mcol,Ncol,Qcol,Vcol collapsed');
+
+      return lines.join('\n');
+    }
+
+    async function render() {
+      const container = document.getElementById('mermaid-container');
+      container.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'mermaid';
+      pre.textContent = buildMermaid();
+      container.appendChild(pre);
+      try {
+        await window.mermaid.run({ nodes: [pre] });
+      } catch (e) {
+        console.error(e);
+        container.innerHTML = '<p style="color:#f59e0b;padding:1rem">Diagram render error — try Expand all.</p>';
+      }
+    }
+
+    function buildSidebar() {
+      const ul = document.getElementById('toggle-list');
+      ul.innerHTML = '';
+      decisions.forEach(d => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <label>
+            <input type="checkbox" data-id="${d.id}" ${expanded[d.id] ? 'checked' : ''}>
+            <span>
+              <span class="t-title">${d.label}</span><br>
+              <span class="t-type">Decision</span>
+            </span>
+          </label>`;
+        ul.appendChild(li);
+      });
+      ul.querySelectorAll('input').forEach(input => {
+        input.addEventListener('change', () => {
+          expanded[input.dataset.id] = input.checked;
+          // If collapsing parent transport, also reflect N/Q
+          if (input.dataset.id === 'M' && !input.checked) {
+            // keep N/Q state but they won't show
+          }
+          render();
+        });
+      });
+    }
+
+    function setAll(val) {
+      decisions.forEach(d => { expanded[d.id] = val; });
+      buildSidebar();
+      render();
+    }
+
+    function setEvidence() {
+      decisions.forEach(d => { expanded[d.id] = !!evidencePreset[d.id]; });
+      buildSidebar();
+      render();
+    }
+
+    window.initCollapsibleMermaid = function () {
+      buildSidebar();
+      render();
+      document.getElementById('btn-expand-all').onclick = () => setAll(true);
+      document.getElementById('btn-collapse-all').onclick = () => setAll(false);
+      document.getElementById('btn-evidence').onclick = setEvidence;
+
+      // Ctrl+wheel zoom
+      let scale = 1;
+      const area = document.getElementById('diagram-area');
+      area.addEventListener('wheel', (e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const svg = area.querySelector('svg');
+        if (!svg) return;
+        scale = Math.min(2.2, Math.max(0.45, scale + (e.deltaY > 0 ? -0.08 : 0.08)));
+        svg.style.transform = `scale(${scale})`;
+        svg.style.transformOrigin = 'top left';
+      }, { passive: false });
+    };
+
+    // In case module already loaded
+    if (window.mermaid) {
+      window.initCollapsibleMermaid();
+    }
+  </script>
+</body>
+</html>
