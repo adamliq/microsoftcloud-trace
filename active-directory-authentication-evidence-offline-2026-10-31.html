@@ -227,4 +227,6 @@ $('discoveryCsv').onclick=()=>download('ldap-application-discovery.csv','text/cs
 function openDiscoveryScenario(key){$('activity').value=key;reset();document.querySelector('[data-view="auth"]').click()}
 $('discoveryAuthExample').onclick=()=>openDiscoveryScenario('ldap');$('discoveryAuthzExample').onclick=()=>openDiscoveryScenario('authorisation');syncDiscovery();
 window.addEventListener('message',event=>{if(event.source===document.getElementById('ldapDecisionFrame').contentWindow&&event.data?.type==='ad-lab-return')document.querySelector('[data-view="auth"]').click()});
+// Deep links from companion pages: ?scenario=<scenario key> and ?view=<view id>, in the query string or #fragment.
+{const p=new URLSearchParams(location.search||location.hash.slice(1)),sc=p.get('scenario'),v=p.get('view');if(sc&&models[sc]){$('activity').value=sc;reset();}if(v)document.querySelector('[data-view="'+CSS.escape(v)+'"]')?.click();}
 </script></body></html>
