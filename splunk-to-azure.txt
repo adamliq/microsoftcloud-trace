@@ -1,0 +1,147 @@
+# ========== CONFIGURATION ==========
+$token           = "<YOUR_TOKEN>"
+$stack           = "<stack>"                          # e.g. "mycompany"
+$index           = "<your_index>"
+$startDate       = Get-Date "2025-01-01"
+$endDate         = Get-Date "2025-01-31"              # inclusive
+$outputDir       = "C:\Exports\Splunk"
+
+# Azure Blob settings
+$storageAccount  = "<storageaccount>"
+$container       = "<container>"
+$blobPrefix      = "historical/"                      # folder inside the container
+$azCopyPath      = "azcopy"                           # or full path to azcopy.exe
+
+# Create local output folder
+if (-not (Test-Path $outputDir)) {
+    New-Item -ItemType Directory -Path $outputDir | Out-Null
+}
+
+$uri = "https://$stack.splunkcloud.com:8089/services/search/v2/jobs/export"
+$headers = @{
+    Authorization = "Bearer $token"
+}
+
+# ========== LOOP ==========
+$current = $startDate
+
+while ($current -le $endDate) {
+
+    $nextDay     = $current.AddDays(1)
+    $earliest    = $current.ToString("yyyy-MM-ddT00:00:00")
+    $latest      = $nextDay.ToString("yyyy-MM-ddT00:00:00")
+    $baseName    = "events_{0:yyyy-MM-dd}" -f $current
+    $csvFile     = Join-Path $outputDir "$baseName.csv"
+    $jsonFile    = Join-Path $outputDir "$baseName.json"
+    $blobPath    = "$blobPrefix$baseName.json"
+    $blobUrl     = "https://$storageAccount.blob.core.windows.net/$container/$blobPath"
+
+    Write-Host "`n=== $($current.ToString('yyyy-MM-dd')) ===" -ForegroundColor Cyan
+
+    # ----- Skip if final JSON already exists -----
+    if (Test-Path $jsonFile) {
+        Write-Host "  JSON already exists → skipping export & conversion" -ForegroundColor DarkGray
+    }
+    else {
+        # 1. Export as CSV from Splunk
+        if (-not (Test-Path $csvFile)) {
+            Write-Host "  Exporting $earliest → $latest ..." -ForegroundColor Yellow
+
+            $body = @{
+                search      = "search index=$index earliest=$earliest latest=$latest | table _time, host, source, sourcetype, _raw"
+                output_mode = "csv"
+            }
+
+            try {
+                Invoke-RestMethod -Uri $uri `
+                                  -Method Post `
+                                  -Headers $headers `
+                                  -Body $body `
+                                  -SkipCertificateCheck `
+                                  -TimeoutSec 7200 `
+                                  -OutFile $csvFile
+
+                Write-Host "  ✓ CSV exported: $csvFile" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "  ✗ Export failed: $($_.Exception.Message)" -ForegroundColor Red
+                $current = $nextDay
+                continue
+            }
+        }
+        else {
+            Write-Host "  CSV already exists → using it for conversion" -ForegroundColor DarkGray
+        }
+
+        # 2. Convert CSV → JSON Array (Logs Ingestion API format)
+        Write-Host "  Converting to JSON Array format ..." -ForegroundColor Yellow
+
+        try {
+            $events = Import-Csv -Path $csvFile
+
+            $jsonArray = foreach ($row in $events) {
+                # Convert Splunk _time to Unix epoch (seconds)
+                $epoch = $null
+                if ($row._time -match '^\d+(\.\d+)?$') {
+                    $epoch = [math]::Floor([double]$row._time)
+                }
+                else {
+                    $epoch = [math]::Floor(
+                        ([datetime]$row._time).ToUniversalTime().
+                        Subtract([datetime]'1970-01-01').TotalSeconds
+                    )
+                }
+
+                [PSCustomObject]@{
+                    time = $epoch
+                    data = [PSCustomObject]@{
+                        source     = $row.source
+                        sourcetype = $row.sourcetype
+                        time       = $epoch
+                        host       = $row.host
+                        _raw       = $row._raw
+                    }
+                }
+            }
+
+            # Write as a proper JSON array
+            $jsonArray | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonFile -Encoding UTF8
+
+            Write-Host "  ✓ JSON Array created: $jsonFile" -ForegroundColor Green
+
+            # Optional: delete temporary CSV after successful conversion
+            # Remove-Item $csvFile -Force
+        }
+        catch {
+            Write-Host "  ✗ JSON conversion failed: $($_.Exception.Message)" -ForegroundColor Red
+            $current = $nextDay
+            continue
+        }
+    }
+
+    # ----- Upload JSON to Azure Blob -----
+    if (Test-Path $jsonFile) {
+        Write-Host "  Uploading to Azure Blob ..." -ForegroundColor Yellow
+
+        try {
+            & $azCopyPath copy $jsonFile $blobUrl --overwrite=ifSourceNewer --check-length=false
+
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  ✓ Uploaded: $blobUrl" -ForegroundColor Green
+
+                # Optional: delete local JSON after successful upload
+                # Remove-Item $jsonFile -Force
+            }
+            else {
+                Write-Host "  ✗ AzCopy failed (exit code $LASTEXITCODE)" -ForegroundColor Red
+            }
+        }
+        catch {
+            Write-Host "  ✗ Upload error: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    $current = $nextDay
+}
+
+Write-Host "`nAll done." -ForegroundColor Yellow
